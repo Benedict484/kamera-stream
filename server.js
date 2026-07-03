@@ -38,6 +38,8 @@ function send(ws, obj) {
 wss.on('connection', (ws) => {
   ws.room = null;
   ws.role = null;
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
 
   ws.on('message', (raw, isBinary) => {
     // Binärdaten = ein Bild vom Sender. Direkt und ohne Umwege an den
@@ -97,3 +99,17 @@ server.listen(PORT, () => {
   console.log('  Jetzt in einem zweiten Terminal-Fenster: ngrok http ' + PORT);
   console.log('');
 });
+
+// Alle 20 Sekunden prüfen, ob Verbindungen noch "leben". Antwortet ein Gerät
+// nicht (z.B. weil der Bildschirm gesperrt wurde, der Tab abgestürzt ist oder
+// das WLAN abbrach), wird die Verbindung sauber getrennt — die Gegenseite
+// bekommt dann zuverlässig die "peer-left"-Meldung statt eines eingefrorenen Bildes.
+const heartbeatInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) { ws.terminate(); return; }
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 20000);
+
+wss.on('close', () => clearInterval(heartbeatInterval));
