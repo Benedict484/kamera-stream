@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Linse — Kamera-Übertragung</title>
+<title>Beam — Kamera & Bildschirm live übertragen</title>
 <style>
   :root{
     --ink:#0d1210; --panel:#141b18; --panel-2:#1b2420;
@@ -61,17 +61,34 @@
 
   <div id="start-screen" class="screen active">
     <div class="aperture"></div>
-    <div class="eyebrow">Server-Relay · funktioniert unabhängig vom Router</div>
-    <h1>Linse</h1>
-    <p class="sub">Verbinde dein iPhone direkt mit deinem PC und sieh die Kamera live im Browser.</p>
+    <div class="eyebrow">Server-Relay · funktioniert auf jedem Gerät</div>
+    <h1>Beam</h1>
+    <p class="sub">Verbinde zwei beliebige Geräte und übertrage Kamera oder Bildschirm live im Browser.</p>
     <div class="choice-row">
       <button class="choice" id="btn-sender">
-        <span class="ic">📱</span>
-        <span class="meta">Handy — Sender<small>Kamera freigeben und Code erzeugen</small></span>
+        <span class="ic">📡</span>
+        <span class="meta">Sender<small>Kamera oder Bildschirm freigeben</small></span>
       </button>
       <button class="choice" id="btn-receiver">
+        <span class="ic">👁️</span>
+        <span class="meta">Empfänger<small>Code eingeben und Übertragung ansehen</small></span>
+      </button>
+    </div>
+  </div>
+
+  <div id="sender-choice-screen" class="screen">
+    <button class="back-btn" id="sender-choice-back">← Zurück</button>
+    <div class="aperture"></div>
+    <div class="eyebrow">Was möchtest du übertragen?</div>
+    <h1 style="font-size:24px;">Quelle wählen</h1>
+    <div class="choice-row" style="margin-top:20px;">
+      <button class="choice" id="btn-source-camera">
+        <span class="ic">📷</span>
+        <span class="meta">Kamera<small>Funktioniert auf jedem Gerät</small></span>
+      </button>
+      <button class="choice" id="btn-source-screen">
         <span class="ic">🖥️</span>
-        <span class="meta">PC — Empfänger<small>Code eingeben und Bild ansehen</small></span>
+        <span class="meta">Bildschirm<small>Nur auf PC/Mac — nicht auf iPhone/iPad</small></span>
       </button>
     </div>
   </div>
@@ -86,7 +103,7 @@
       </div>
       <div class="hud-bottom">
         <div class="code-card">
-          <div class="lbl">Code auf dem PC eingeben</div>
+          <div class="lbl">Code auf dem Empfänger-Gerät eingeben</div>
           <div class="code" id="peer-code">– – – –</div>
         </div>
       </div>
@@ -114,10 +131,24 @@
   const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   function generateCode(len){ let s=''; for(let i=0;i<len;i++) s+=CHARS[Math.floor(Math.random()*CHARS.length)]; return s; }
 
-  const screens = { start: document.getElementById('start-screen'), sender: document.getElementById('sender-screen'), receiver: document.getElementById('receiver-screen') };
+  const screens = { start: document.getElementById('start-screen'), senderChoice: document.getElementById('sender-choice-screen'), sender: document.getElementById('sender-screen'), receiver: document.getElementById('receiver-screen') };
   function show(name){ Object.values(screens).forEach(s=>s.classList.remove('active')); screens[name].classList.add('active'); }
 
-  document.getElementById('btn-sender').onclick = () => { show('sender'); startSender(); };
+  document.getElementById('btn-sender').onclick = () => {
+    show('senderChoice');
+    const screenBtn = document.getElementById('btn-source-screen');
+    const supported = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+    screenBtn.style.opacity = supported ? '1' : '.4';
+  };
+  document.getElementById('btn-source-camera').onclick = () => { show('sender'); startSender('camera'); };
+  document.getElementById('btn-source-screen').onclick = () => {
+    if(!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)){
+      alert('Bildschirm teilen wird auf diesem Gerät/Browser nicht unterstützt (z.B. iPhone/iPad). Bitte Kamera wählen oder einen PC/Mac-Browser benutzen.');
+      return;
+    }
+    show('sender'); startSender('screen');
+  };
+  document.getElementById('sender-choice-back').onclick = () => show('start');
   document.getElementById('btn-receiver').onclick = () => show('receiver');
   document.getElementById('sender-back').onclick = () => { cleanupSender(); show('start'); };
   document.getElementById('receiver-back').onclick = () => { cleanupReceiver(); show('start'); };
@@ -135,7 +166,7 @@
   // ---------------- SENDER ----------------
   let senderSocket=null, localStream=null, captureTimer=null;
 
-  async function startSender(){
+  async function startSender(mode){
     const statusEl = document.getElementById('sender-status');
     const dotEl = document.getElementById('sender-dot');
     const codeEl = document.getElementById('peer-code');
@@ -143,9 +174,15 @@
     const canvas = document.getElementById('capture-canvas');
 
     try{
-      localStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:'environment' } } });
+      if(mode === 'screen'){
+        localStream = await navigator.mediaDevices.getDisplayMedia({ video:{ frameRate:{ ideal:10 } }, audio:false });
+        // Falls der Nutzer die Freigabe über den Browser-Dialog beendet:
+        localStream.getVideoTracks()[0].onended = () => { cleanupSender(); show('start'); };
+      } else {
+        localStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:'environment' } } });
+      }
       video.srcObject = localStream;
-    }catch(e){ statusEl.textContent = 'Kein Kamerazugriff: ' + e.message; return; }
+    }catch(e){ statusEl.textContent = 'Kein Zugriff: ' + e.message; return; }
 
     const code = generateCode(4);
     codeEl.textContent = code.split('').join(' ');
@@ -157,13 +194,13 @@
     };
     senderSocket.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
-      if(msg.type === 'registered'){ statusEl.textContent = 'Bereit — warte auf PC'; }
+      if(msg.type === 'registered'){ statusEl.textContent = 'Bereit — warte auf Empfänger'; }
       if(msg.type === 'peer-joined'){
-        statusEl.textContent = 'PC verbunden ✓'; dotEl.classList.add('live');
-        startCaptureLoop(video, canvas);
+        statusEl.textContent = 'Verbunden ✓'; dotEl.classList.add('live');
+        startCaptureLoop(video, canvas, mode);
       }
       if(msg.type === 'peer-left'){
-        statusEl.textContent = 'Bereit — warte auf PC'; dotEl.classList.remove('live');
+        statusEl.textContent = 'Bereit — warte auf Empfänger'; dotEl.classList.remove('live');
         stopCaptureLoop();
       }
     };
@@ -171,17 +208,17 @@
     senderSocket.onclose = () => { stopCaptureLoop(); };
   }
 
-  function startCaptureLoop(video, canvas){
+  function startCaptureLoop(video, canvas, mode){
     stopCaptureLoop();
     const ctx = canvas.getContext('2d');
+    const targetW = mode === 'screen' ? 1280 : 720;
     captureTimer = setInterval(() => {
       if(!video.videoWidth) return;
-      const targetW = 720;
       const scale = targetW / video.videoWidth;
       canvas.width = targetW;
       canvas.height = video.videoHeight * scale;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const data = canvas.toDataURL('image/jpeg', 0.55);
+      const data = canvas.toDataURL('image/jpeg', mode === 'screen' ? 0.65 : 0.55);
       if(senderSocket && senderSocket.readyState === WebSocket.OPEN){
         senderSocket.send(JSON.stringify({ type:'frame', data }));
       }
@@ -222,13 +259,13 @@
     };
     receiverSocket.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
-      if(msg.type === 'registered'){ msgEl.textContent = 'Warte auf Handy …'; }
+      if(msg.type === 'registered'){ msgEl.textContent = 'Warte auf Sender …'; }
       if(msg.type === 'peer-joined'){
         msgEl.textContent = ''; connectPanel.classList.add('hidden'); videoPanel.classList.remove('hidden'); connectBtn.disabled=false;
       }
       if(msg.type === 'peer-left'){
         connectPanel.classList.remove('hidden'); videoPanel.classList.add('hidden');
-        msgEl.textContent = 'Handy hat die Verbindung beendet'; connectBtn.disabled=false;
+        msgEl.textContent = 'Sender hat die Verbindung beendet'; connectBtn.disabled=false;
       }
       if(msg.type === 'frame'){ remoteImg.src = msg.data; }
       if(msg.type === 'error'){ msgEl.textContent = msg.message; msgEl.classList.add('err'); connectBtn.disabled=false; }
