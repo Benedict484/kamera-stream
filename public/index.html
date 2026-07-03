@@ -59,7 +59,13 @@
   .primary-btn:disabled{opacity:.5;}
   #remote-canvas-wrap{width:100%; height:100%; background:#000; display:flex; align-items:center; justify-content:center;}
   #remote-img{max-width:100%; max-height:100%;}
-  .receiver-hud{position:absolute; top:0; left:0; right:0; z-index:5; padding:calc(16px + env(safe-area-inset-top)) 18px 16px; background:linear-gradient(to bottom, rgba(0,0,0,0.55), transparent); display:flex; justify-content:flex-end; align-items:center;}
+  .receiver-hud{position:absolute; top:0; left:0; right:0; z-index:5; padding:calc(16px + env(safe-area-inset-top)) 18px 16px; background:linear-gradient(to bottom, rgba(0,0,0,0.55), transparent); display:flex; justify-content:flex-end; align-items:center; gap:8px;}
+  .icon-btn{width:38px; height:38px; border-radius:50%; background:rgba(20,27,24,0.7); border:1px solid var(--line); backdrop-filter:blur(8px); color:var(--text); font-size:16px; display:flex; align-items:center; justify-content:center; cursor:pointer;}
+  .icon-btn:active{transform:scale(0.94);}
+  .ended-overlay{position:fixed; inset:0; z-index:50; background:rgba(13,18,16,0.96); display:none; flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:28px; text-align:center;}
+  .ended-overlay.show{display:flex;}
+  .ended-overlay .ic{font-size:40px;}
+  .ended-overlay p{color:var(--text-dim); font-size:15px; max-width:280px; line-height:1.5;}
   .msg{font-family:var(--mono); font-size:12px; color:var(--text-dim); text-align:center; min-height:18px;}
   .msg.err{color:#f4795b;}
   .hidden{display:none !important;}
@@ -133,9 +139,17 @@
     <div id="remote-canvas-wrap" class="hidden" style="position:absolute; inset:0;">
       <img id="remote-img">
       <div class="receiver-hud">
+        <button class="icon-btn" id="fullscreen-btn" title="Vollbild">⛶</button>
         <div class="status-pill"><span class="dot live"></span><span>Live</span></div>
       </div>
     </div>
+  </div>
+
+  <div class="ended-overlay" id="ended-overlay">
+    <div class="ic">📡</div>
+    <h1 style="font-size:22px; margin:0;">Übertragung beendet</h1>
+    <p>Der Sender hat die Übertragung abgebrochen oder die Verbindung getrennt.</p>
+    <button class="primary-btn" id="ended-ok-btn" style="max-width:220px;">Zurück zum Start</button>
   </div>
 
 <script>
@@ -274,6 +288,36 @@
   const videoPanel = document.getElementById('remote-canvas-wrap');
   const connectBtn = document.getElementById('connect-btn');
   const remoteImg = document.getElementById('remote-img');
+  const fullscreenBtn = document.getElementById('fullscreen-btn');
+  const endedOverlay = document.getElementById('ended-overlay');
+
+  const canFullscreen = !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+  if(!canFullscreen){ fullscreenBtn.style.display = 'none'; }
+
+  function toggleFullscreen(){
+    const el = videoPanel;
+    const isFs = document.fullscreenElement || document.webkitFullscreenElement;
+    if(!isFs){
+      if(el.requestFullscreen) el.requestFullscreen();
+      else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    } else {
+      if(document.exitFullscreen) document.exitFullscreen();
+      else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
+    }
+  }
+  fullscreenBtn.onclick = toggleFullscreen;
+  document.addEventListener('fullscreenchange', () => {
+    fullscreenBtn.textContent = (document.fullscreenElement) ? '✕' : '⛶';
+  });
+  document.addEventListener('webkitfullscreenchange', () => {
+    fullscreenBtn.textContent = (document.webkitFullscreenElement) ? '✕' : '⛶';
+  });
+
+  document.getElementById('ended-ok-btn').onclick = () => {
+    endedOverlay.classList.remove('show');
+    cleanupReceiver();
+    show('start');
+  };
 
   codeInput.addEventListener('input', () => { codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g,''); });
 
@@ -307,7 +351,11 @@
       }
       if(msg.type === 'peer-left'){
         connectPanel.classList.remove('hidden'); videoPanel.classList.add('hidden');
-        msgEl.textContent = 'Sender hat die Verbindung beendet'; connectBtn.disabled=false;
+        // Vollbild beenden, falls aktiv, und den Empfänger klar informieren
+        if(document.fullscreenElement && document.exitFullscreen) document.exitFullscreen();
+        if(document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+        endedOverlay.classList.add('show');
+        msgEl.textContent = ''; connectBtn.disabled=false;
       }
       if(msg.type === 'error'){ msgEl.textContent = msg.message; msgEl.classList.add('err'); connectBtn.disabled=false; }
     };
