@@ -62,6 +62,9 @@
   .receiver-hud{position:absolute; top:0; left:0; right:0; z-index:5; padding:calc(16px + env(safe-area-inset-top)) 18px 16px; background:linear-gradient(to bottom, rgba(0,0,0,0.55), transparent); display:flex; justify-content:flex-end; align-items:center; gap:8px;}
   .icon-btn{width:38px; height:38px; border-radius:50%; background:rgba(20,27,24,0.7); border:1px solid var(--line); backdrop-filter:blur(8px); color:var(--text); font-size:16px; display:flex; align-items:center; justify-content:center; cursor:pointer;}
   .icon-btn:active{transform:scale(0.94);}
+  #remote-canvas-wrap.maximized{position:fixed; inset:0; z-index:100; background:#000;}
+  #remote-canvas-wrap.maximized .receiver-hud{opacity:0; transition:opacity .25s;}
+  #remote-canvas-wrap.maximized:active .receiver-hud, #remote-canvas-wrap.maximized.show-hud .receiver-hud{opacity:1;}
   .ended-overlay{position:fixed; inset:0; z-index:50; background:rgba(13,18,16,0.96); display:none; flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:28px; text-align:center;}
   .ended-overlay.show{display:flex;}
   .ended-overlay .ic{font-size:40px;}
@@ -292,17 +295,23 @@
   const endedOverlay = document.getElementById('ended-overlay');
 
   const canFullscreen = !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
-  if(!canFullscreen){ fullscreenBtn.style.display = 'none'; }
 
   function toggleFullscreen(){
-    const el = videoPanel;
-    const isFs = document.fullscreenElement || document.webkitFullscreenElement;
-    if(!isFs){
-      if(el.requestFullscreen) el.requestFullscreen();
-      else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    if(canFullscreen){
+      const el = videoPanel;
+      const isFs = document.fullscreenElement || document.webkitFullscreenElement;
+      if(!isFs){
+        if(el.requestFullscreen) el.requestFullscreen();
+        else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      } else {
+        if(document.exitFullscreen) document.exitFullscreen();
+        else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
+      }
     } else {
-      if(document.exitFullscreen) document.exitFullscreen();
-      else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
+      // Fallback für iPhone/iPad: echtes System-Vollbild lässt Safari nicht zu,
+      // daher stattdessen eine maximierte Ansicht ohne Bedienelemente.
+      videoPanel.classList.toggle('maximized');
+      fullscreenBtn.textContent = videoPanel.classList.contains('maximized') ? '✕' : '⛶';
     }
   }
   fullscreenBtn.onclick = toggleFullscreen;
@@ -311,6 +320,14 @@
   });
   document.addEventListener('webkitfullscreenchange', () => {
     fullscreenBtn.textContent = (document.webkitFullscreenElement) ? '✕' : '⛶';
+  });
+  // Im maximierten Fallback-Modus: Tippen aufs Bild zeigt kurz die Bedienelemente
+  remoteImg.addEventListener('click', () => {
+    if(videoPanel.classList.contains('maximized')){
+      videoPanel.classList.add('show-hud');
+      clearTimeout(remoteImg._hideTimer);
+      remoteImg._hideTimer = setTimeout(() => videoPanel.classList.remove('show-hud'), 2000);
+    }
   });
 
   document.getElementById('ended-ok-btn').onclick = () => {
@@ -354,6 +371,7 @@
         // Vollbild beenden, falls aktiv, und den Empfänger klar informieren
         if(document.fullscreenElement && document.exitFullscreen) document.exitFullscreen();
         if(document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+        videoPanel.classList.remove('maximized','show-hud');
         endedOverlay.classList.add('show');
         msgEl.textContent = ''; connectBtn.disabled=false;
       }
@@ -364,7 +382,8 @@
 
   function cleanupReceiver(){
     if(receiverSocket){ receiverSocket.close(); receiverSocket=null; }
-    videoPanel.classList.add('hidden'); connectPanel.classList.remove('hidden');
+    videoPanel.classList.add('hidden'); videoPanel.classList.remove('maximized','show-hud');
+    connectPanel.classList.remove('hidden');
     codeInput.value=''; msgEl.textContent=''; msgEl.classList.remove('err'); connectBtn.disabled=false;
   }
 })();
