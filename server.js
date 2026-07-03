@@ -39,7 +39,19 @@ wss.on('connection', (ws) => {
   ws.room = null;
   ws.role = null;
 
-  ws.on('message', (raw) => {
+  ws.on('message', (raw, isBinary) => {
+    // Binärdaten = ein Bild vom Sender. Direkt und ohne Umwege an den
+    // Empfänger weiterreichen — das spart Rechenzeit und reduziert Verzögerung.
+    if (isBinary) {
+      if (ws.role === 'sender' && ws.room) {
+        const room = rooms.get(ws.room);
+        if (room && room.receiver && room.receiver.readyState === WebSocket.OPEN) {
+          room.receiver.send(raw, { binary: true });
+        }
+      }
+      return;
+    }
+
     let msg;
     try { msg = JSON.parse(raw); } catch (e) { return; }
 
@@ -61,9 +73,8 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    if (msg.type === 'frame' && ws.role === 'sender' && ws.room) {
-      const room = rooms.get(ws.room);
-      if (room && room.receiver) send(room.receiver, { type: 'frame', data: msg.data });
+    if (msg.type === 'leave') {
+      ws.close();
       return;
     }
   });
